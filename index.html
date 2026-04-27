@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Backwards Video Player</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f0f1a;
+      color: #fff;
+      font-family: 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      padding: 32px 16px;
+    }
+    h1 {
+      font-size: 2.2rem;
+      background: linear-gradient(135deg, #a78bfa, #ec4899);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: 1px;
+    }
+    .subtitle { color: #9ca3af; font-size: 0.95rem; margin-top: -16px; }
+    .upload-zone {
+      border: 2px dashed #a78bfa;
+      border-radius: 16px;
+      padding: 40px 60px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+      background: #1a1a2e;
+    }
+    .upload-zone:hover, .upload-zone.drag-over { background: #22223b; border-color: #ec4899; }
+    .upload-zone p { color: #c4b5fd; font-size: 1rem; margin-top: 10px; }
+    .upload-icon { font-size: 3rem; }
+    .player-section {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+      max-width: 800px;
+    }
+    canvas { border-radius: 12px; max-width: 100%; box-shadow: 0 0 40px rgba(167,139,250,0.3); }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; align-items: center; }
+    button {
+      padding: 10px 22px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button:not(:disabled):active { transform: scale(0.96); }
+    .btn-primary { background: linear-gradient(135deg, #a78bfa, #ec4899); color: #fff; }
+    .btn-secondary { background: #22223b; color: #c4b5fd; border: 1px solid #a78bfa; }
+    .btn-secondary:not(:disabled):hover { background: #2d2d50; }
+    .speed-control { display: flex; align-items: center; gap: 8px; color: #c4b5fd; font-size: 0.9rem; }
+    input[type="range"] { accent-color: #a78bfa; width: 100px; }
+    .progress-bar-wrap { width: 100%; background: #22223b; border-radius: 8px; height: 8px; cursor: pointer; }
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #a78bfa, #ec4899);
+      border-radius: 8px;
+      width: 0%;
+      pointer-events: none;
+    }
+    .status { font-size: 0.85rem; color: #9ca3af; min-height: 20px; }
+    .badge { background: #ec4899; color: #fff; font-size: 0.75rem; padding: 2px 10px; border-radius: 99px; font-weight: 700; letter-spacing: 1px; }
+    .top-row { display: flex; align-items: center; gap: 10px; }
+  </style>
+</head>
+<body>
+
+  <h1>&#9194; Backwards Video</h1>
+  <p class="subtitle">Upload any video and watch it play in reverse!</p>
+
+  <div class="upload-zone" id="upload-zone">
+    <div class="upload-icon">&#127916;</div>
+    <p>Tap the button or drag &amp; drop a video here</p>
+    <p style="font-size:0.8rem;color:#6b7280;margin-top:6px;">MP4, WebM, MOV and more supported</p>
+    <input type="file" id="file-input" accept="video/*" style="display:none" />
+    <div style="margin-top:18px;">
+      <button class="btn-primary" onclick="document.getElementById('file-input').click()" style="padding:12px 32px;font-size:1rem;">&#127916; Choose Video</button>
+    </div>
+  </div>
+
+  <div class="player-section" id="player-section">
+    <div class="top-row">
+      <span class="badge">&#9194; REVERSED</span>
+      <span class="status" id="status">Processing frames...</span>
+    </div>
+    <canvas id="canvas"></canvas>
+    <div class="progress-bar-wrap" id="progress-wrap">
+      <div class="progress-bar-fill" id="progress-fill"></div>
+    </div>
+    <div class="controls">
+      <button class="btn-primary" id="play-btn" disabled>&#9654; Play</button>
+      <button class="btn-secondary" id="restart-btn" disabled>&#9198; Restart</button>
+      <button class="btn-secondary" id="reset-btn">&#128194; New Video</button>
+      <div class="speed-control">
+        <label for="speed-range">Speed:</label>
+        <input type="range" id="speed-range" min="0.25" max="3" step="0.25" value="1" />
+        <span id="speed-label">1x</span>
+      </div>
+    </div>
+  </div>
+
+  <video id="hidden-video" style="display:none" muted playsinline></video>
+
+  <script>
+    const uploadZone    = document.getElementById('upload-zone');
+    const fileInput     = document.getElementById('file-input');
+    const playerSection = document.getElementById('player-section');
+    const canvas        = document.getElementById('canvas');
+    const ctx           = canvas.getContext('2d');
+    const playBtn       = document.getElementById('play-btn');
+    const restartBtn    = document.getElementById('restart-btn');
+    const resetBtn      = document.getElementById('reset-btn');
+    const statusEl      = document.getElementById('status');
+    const progressFill  = document.getElementById('progress-fill');
+    const progressWrap  = document.getElementById('progress-wrap');
+    const speedRange    = document.getElementById('speed-range');
+    const speedLabel    = document.getElementById('speed-label');
+    const hiddenVideo   = document.getElementById('hidden-video');
+
+    let frames = [], fps = 24, frameIndex = 0;
+    let playing = false, animFrame = null, lastTime = null, speed = 1;
+    const msPerFrame = () => (1000 / fps) / speed;
+
+    uploadZone.addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON') fileInput.click(); });
+    uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+    uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+    uploadZone.addEventListener('drop', e => {
+      e.preventDefault(); uploadZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('video/')) loadVideo(file);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadVideo(fileInput.files[0]); });
+
+    resetBtn.addEventListener('click', () => {
+      stopPlayback(); frames = []; frameIndex = 0;
+      playerSection.style.display = 'none';
+      uploadZone.style.display = '';
+      fileInput.value = '';
+      progressFill.style.width = '0%';
+    });
+
+    speedRange.addEventListener('input', () => {
+      speed = parseFloat(speedRange.value);
+      speedLabel.textContent = speed + 'x';
+    });
+
+    playBtn.addEventListener('click', () => { if (playing) pausePlayback(); else startPlayback(); });
+    restartBtn.addEventListener('click', () => { frameIndex = 0; drawFrame(0); updateProgress(); if (playing) lastTime = null; });
+    progressWrap.addEventListener('click', e => {
+      if (!frames.length) return;
+      const rect = progressWrap.getBoundingClientRect();
+      frameIndex = Math.floor(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * (frames.length - 1));
+      drawFrame(frameIndex); updateProgress();
+    });
+
+    function loadVideo(file) {
+      uploadZone.style.display = 'none';
+      playerSection.style.display = 'flex';
+      playBtn.disabled = true; restartBtn.disabled = true;
+      statusEl.textContent = 'Loading video...';
+      frames = []; frameIndex = 0; progressFill.style.width = '0%';
+      hiddenVideo.src = URL.createObjectURL(file);
+      hiddenVideo.load();
+      hiddenVideo.addEventListener('loadedmetadata', captureFrames, { once: true });
+    }
+
+    async function captureFrames() {
+      const video = hiddenVideo;
+      fps = 24;
+      const total = Math.floor(video.duration * fps);
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 360;
+      statusEl.textContent = 'Capturing ' + total + ' frames... 0%';
+      for (let i = 0; i < total; i++) {
+        await seekTo(video, i / fps);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (i % 8 === 0 || i === total - 1) {
+          const pct = Math.round(((i + 1) / total) * 100);
+          statusEl.textContent = 'Capturing frames... ' + pct + '%';
+          progressFill.style.width = pct + '%';
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      frames.reverse();
+      frameIndex = 0; drawFrame(0);
+      progressFill.style.width = '0%';
+      statusEl.textContent = frames.length + ' frames ready - hit Play!';
+      playBtn.disabled = false; restartBtn.disabled = false;
+    }
+
+    function seekTo(video, time) {
+      return new Promise(resolve => {
+        video.addEventListener('seeked', resolve, { once: true });
+        video.currentTime = time;
+      });
+    }
+
+    function drawFrame(i) { if (frames[i]) ctx.putImageData(frames[i], 0, 0); }
+    function updateProgress() {
+      progressFill.style.width = (frames.length > 1 ? (frameIndex / (frames.length - 1)) * 100 : 0) + '%';
+    }
+
+    function startPlayback() {
+      if (frameIndex >= frames.length - 1) frameIndex = 0;
+      playing = true; playBtn.textContent = 'Pause'; lastTime = null;
+      animFrame = requestAnimationFrame(renderLoop);
+      statusEl.textContent = 'Playing backwards...';
+    }
+    function pausePlayback() { playing = false; playBtn.textContent = 'Play'; if (animFrame) cancelAnimationFrame(animFrame); }
+    function stopPlayback() { playing = false; if (animFrame) cancelAnimationFrame(animFrame); playBtn.textContent = 'Play'; }
+
+    function renderLoop(timestamp) {
+      if (!playing) return;
+      if (!lastTime) lastTime = timestamp;
+      if (timestamp - lastTime >= msPerFrame()) {
+        drawFrame(frameIndex); updateProgress(); frameIndex++; lastTime = timestamp;
+        if (frameIndex >= frames.length) {
+          frameIndex = frames.length - 1; pausePlayback();
+          statusEl.textContent = 'Finished!'; return;
+        }
+      }
+      animFrame = requestAnimationFrame(renderLoop);
+    }
+  </script>
+</body>
+</html>
