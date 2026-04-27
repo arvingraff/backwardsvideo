@@ -372,12 +372,18 @@
     const video = hiddenVideo;
     fps = 24;
     const total = Math.floor(video.duration * fps);
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 360;
+    const dpr = window.devicePixelRatio || 1;
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    canvas.width = vw * dpr;
+    canvas.height = vh * dpr;
+    canvas.style.width = '100%';
+    canvas.style.height = 'auto';
+    ctx.scale(dpr, dpr);
     statusEl.textContent = 'Capturing ' + total + ' frames… 0%';
     for (let i = 0; i < total; i++) {
       await seekTo(video, i / fps);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, vw, vh);
       frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
       if (i % 8 === 0 || i === total - 1) {
         const pct = Math.round(((i + 1) / total) * 100);
